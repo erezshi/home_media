@@ -82,14 +82,24 @@ def update_duplicate_count(conn, file_hash):
     conn.commit()
 
 def find_duplicates_and_store(conn, files):
-    """Find duplicate files and store their information."""
+    """Find duplicate files and store their information, comparing against the database."""
+    cursor = conn.cursor()
     hashes = {}
+
     for file in tqdm(files, desc="Processing files"):
         file_hash = hash_file(file)
         size, date_taken, date_saved = get_file_info(file)
 
-        if file_hash in hashes:
+        # Check if the hash already exists in the database
+        cursor.execute('SELECT hash FROM files WHERE hash = ?', (file_hash,))
+        db_entry = cursor.fetchone()
+
+        if db_entry:
             # File is a duplicate; insert it with duplicate marked as 1
+            file_info = (file_hash, file, size, date_taken, date_saved, 1)
+            insert_file_info(conn, file_info)
+        elif file_hash in hashes:
+            # File is a duplicate within the current set of files
             file_info = (file_hash, file, size, date_taken, date_saved, 1)
             insert_file_info(conn, file_info)
         else:
@@ -99,20 +109,27 @@ def find_duplicates_and_store(conn, files):
             hashes[file_hash] = file_hash  # Store the hash to track duplicates
 
 
+
 # Replace 'your_directory_path' with the actual path you want to search
-path_to_search = r'H:\My Pictures'  # Use a raw string to avoid escape issues
+# path_to_search = r'H:\My Pictures'  # Use a raw string to avoid escape issues
+
+paths_to_search = [r'H:\Documents', r'H:\Erez_Mobile', r'H:\Mobile', r'H:\My Pictures', r'H:\My Videos',r'H:\PC_backup', r'H:\Picasa', r'H:\kids_photos']
 db_path = 'media_files_staging.db'  # Database file path
 
 # Connect to the database
 conn = create_connection(db_path)
 create_table(conn)
 
-# Find media files
-found_media_files = find_media_files(path_to_search)
+# Find media files from multiple paths
+all_media_files = {'images': [], 'videos': []}
+for path in paths_to_search:
+    found_media_files = find_media_files(path)
+    all_media_files['images'].extend(found_media_files['images'])
+    all_media_files['videos'].extend(found_media_files['videos'])
 
-# Process images and videos for duplicates and store in the database
+# Process images and videos for duplicates and store them in the database
 for media_type in ['images', 'videos']:
-    find_duplicates_and_store(conn, found_media_files.get(media_type, []))
+    find_duplicates_and_store(conn, all_media_files.get(media_type, []))
 
 # Close the database connection
 conn.close()
