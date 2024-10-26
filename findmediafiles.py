@@ -101,7 +101,7 @@ def find_duplicates_and_store(conn, files):
 
 # Replace 'your_directory_path' with the actual path you want to search
 path_to_search = r'H:\My Pictures'  # Use a raw string to avoid escape issues
-db_path = 'media_files.db'  # Database file path
+db_path = 'media_files_staging.db'  # Database file path
 
 # Connect to the database
 conn = create_connection(db_path)
