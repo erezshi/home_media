@@ -3,6 +3,20 @@ import hashlib
 import sqlite3
 from datetime import datetime
 from tqdm import tqdm
+from PIL import Image
+from PIL.ExifTags import TAGS
+from hachoir.parser import createParser
+from hachoir.metadata import extractMetadata
+from pathlib import Path
+import logging
+
+
+# Set up logging to file
+logging.basicConfig(
+    filename='getmedia_info.log',
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 
 # Define the file extensions for pictures and videos
 IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff'}
@@ -55,12 +69,46 @@ def find_media_files(start_path):
     
     return media_files
 
+
+
 def get_file_info(filepath):
-    """Get file size and creation date."""
+    """Get file size and the actual date taken from metadata, if available."""
     size = os.path.getsize(filepath)
-    date_taken = datetime.fromtimestamp(os.path.getctime(filepath)).isoformat()
+    date_taken = None
+
+    # Check if the file is an image and try to read the EXIF date taken
+    ext = Path(filepath).suffix.lower()
+    if ext in IMAGE_EXTENSIONS:
+        try:
+            with Image.open(filepath) as img:
+                exif_data = img._getexif()
+                if exif_data:
+                    for tag, value in exif_data.items():
+                        tag_name = TAGS.get(tag, tag)
+                        if tag_name == 'DateTimeOriginal':  # Common EXIF tag for date taken
+                            date_taken = value
+                            break
+        except Exception as e:
+            logging.info(f"Error reading EXIF data for {filepath}: {e}")
+
+    # If it's a video, try to read the metadata date
+    elif ext in VIDEO_EXTENSIONS:
+        try:
+            parser = createParser(filepath)
+            if parser:
+                metadata = extractMetadata(parser)
+                if metadata and metadata.has("creation_date"):
+                    date_taken = metadata.get("creation_date").strftime("%Y-%m-%d %H:%M:%S")
+        except Exception as e:
+            logging.error(f"Error reading video metadata for {filepath}: {e}")
+
+    # Fallback to creation date if no metadata date is found
+    if not date_taken:
+        date_taken = datetime.fromtimestamp(os.path.getctime(filepath)).isoformat()
+
     date_saved = datetime.now().isoformat()
     return size, date_taken, date_saved
+
 
 def insert_file_info(conn, file_info):
     """Insert or update file information in the database."""
@@ -90,6 +138,14 @@ def find_duplicates_and_store(conn, files):
         file_hash = hash_file(file)
         size, date_taken, date_saved = get_file_info(file)
 
+        cursor.execute("SELECT COUNT(*) FROM files WHERE path = ?", (file,))
+        exists = cursor.fetchone()[0] > 0
+
+        if exists:
+            logging.info(f"Skipped duplicate file with the same path: {file} (Hash: {file_hash}) already exists in database.")
+            continue
+
+
         # Check if the hash already exists in the database
         cursor.execute('SELECT hash FROM files WHERE hash = ?', (file_hash,))
         db_entry = cursor.fetchone()
@@ -113,7 +169,7 @@ def find_duplicates_and_store(conn, files):
 # Replace 'your_directory_path' with the actual path you want to search
 # path_to_search = r'H:\My Pictures'  # Use a raw string to avoid escape issues
 
-paths_to_search = [r'H:\PC_backup']
+paths_to_search = [r'H:\My Media']
 db_path = 'media_files_staging.db'  # Database file path
 
 # Connect to the database

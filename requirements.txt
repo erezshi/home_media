@@ -1,0 +1,4 @@
+colorama==0.4.6
+hachoir==3.3.0
+pillow==11.0.0
+tqdm==4.66.5
